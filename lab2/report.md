@@ -62,3 +62,67 @@ Rows matched: 11  Changed: 11  Warnings: 0
 
 ## Question 5
 
+mysql> create table customer (
+	id integer, street varchar(120),
+	name varchar(120), city integer not null,
+	constraint pk_customer primary key (id),
+	constraint fk_city foreign key (city) references jbcity(id));
+Query OK, 0 rows affected (0.02 sec)
+
+mysql> create table account(
+	account_number integer,
+	balance integer not null default 0,
+	owner integer,
+	constraint pk_account primary key (account_number),
+	constraint fk_owner foreign key (owner) references customer(id));
+Query OK, 0 rows affected (0.02 sec)
+
+mysql> create table transaction(
+	transaction_number integer,
+	timestamp timestamp not null default current_timestamp,
+	amount integer not null,
+	account integer not null, 
+	responsible integer not null, 
+	constraint pk_transaction 
+		primary key (transaction_number), 
+	constraint fk_account 
+		foreign key (account) references account(account_number), 
+	constraint fk_responsible 
+		foreign key (responsible) references jbemployee(id)
+	);
+Query OK, 0 rows affected (0.02 sec)
+
+mysql> create table withdrawal (
+	id integer, 
+	constraint pk_withdrawal primary key (id), 
+	constraint fk_transaction 
+		foreign key (id) references transaction(transaction_number)
+	);
+Query OK, 0 rows affected (0.01 sec)
+
+mysql> create table deposit(
+	id integer, 
+	constraint pk_deposit primary key (id), 
+	constraint fk_transaction2 foreign key (id) references transaction(transaction_number));
+Query OK, 0 rows affected (0.01 sec)
+
+mysql> truncate jbsale;
+Query OK, 0 rows affected (0.03 sec)
+
+mysql> alter table jbsale drop foreign key fk_sale_debit;
+Query OK, 0 rows affected (0.03 sec)
+Records: 0  Duplicates: 0  Warnings: 0
+
+mysql> drop table jbdebit;
+Query OK, 0 rows affected (0.02 sec)
+
+mysql> create table debit(
+	id integer, 
+	constraint pk_debit primary key (id), 
+	constraint fk_transaction3 foreign key (id) references transaction(transaction_number));
+Query OK, 0 rows affected (0.03 sec)
+
+mysql> alter table jbsale add constraint fk_sale_debit foreign key (debit) references debit(id);
+Query OK, 0 rows affected (0.03 sec)
+Records: 0  Duplicates: 0  Warnings: 0
+
