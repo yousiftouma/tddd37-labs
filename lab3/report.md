@@ -66,6 +66,7 @@ FD4: E -> F
 FD5: D -> E
 FD6: D -> F
 ```
+
 We now convert to 2NF using the algorithm given in the lectures
 
 ```
@@ -149,20 +150,63 @@ FD2 breaks BCNF for R1X, decompose into new relations:
 Final relations are R1X1, R1X2, R1Y and R2
 ```
 
+## Question 3
+We introduce some abbreviations for the attributes:
 
+```
+Title#      = t#
+Title       = t
+Author#     = a#
+Booktype    = bt
+Price       = pr
+Authorname  = an
+Publisher   = pu
+```
 
+The FDs given:
 
+```
+FD1: t# -> t, bt, pu
+FD2: a# -> an
+FD3: bt -> pr
+FD4: t# -> pr (infered)
+```
 
+### 3A
 
+The relation is in 1NF atleast since we do not have any multivalued attributes
+It is not 2NF, due to FD2 since an is non-prime and a# is part of a candidate key
 
+### 3B
 
+```
+FD2 breaks 2NF, decompose into new relations:
+  R1(t#, a#, t, bt, pu, pr):
+    FDs: 1,3,4
+    Candidate key: (t#, a#)
+  R2(a#, an):
+    FDs: 2
+    Candidate key: a#
+    In BCNF, nothing more to be done
 
+FD1 breaks 2NF for R1, decompose into new relations:
+  R1X(t#, a#, pr):
+    FDs: 4
+    Candidate key: (t#, a#)
+  R1Y(t#, t, bt, pu)
+    FDs: 1
+    Candidate key: t#
+    In BCNF, nothing more to be done
 
+FD4 breaks 2NF for R1X, decompose into new relations:
+  R1X1(t#, a#):
+    FDs: None,
+    Candidate key: (t#, a#)
+    In BCNF, nothing more to be done
+  R1X2(t#, pr):
+    FDs: 4,
+    Candidate key: t#
+    In BCNF, nothing more to be done
 
-
-
-
-
-
-
-
+Final relations are R1X1, R1X2, R1Y and R2
+```
