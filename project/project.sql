@@ -20,6 +20,7 @@ DROP PROCEDURE IF EXISTS addRoute;
 DROP PROCEDURE IF EXISTS addFlight;
 DROP FUNCTION IF EXISTS calculateFreeSeats;
 DROP FUNCTION IF EXISTS calculatePrice;
+DROP TRIGGER IF EXISTS onBooking;
 
 /* Create all neccessary tables */
 CREATE TABLE IF NOT EXISTS year (
@@ -195,5 +196,40 @@ BEGIN
 
   RETURN @route_price*@weekday_factor*((@booked_seats+1)/40)*@profit_factor;
 END;//
+
+
+CREATE TRIGGER onBooking
+BEFORE INSERT ON booking
+FOR EACH ROW
+BEGIN
+ SET @f_nr = (SELECT flight_number FROM reservation WHERE reservation_number = NEW.reservation_number);
+
+  SET @bDone = 0;
+
+  DECLARE p_nr INTEGER UNSIGNED DEFAULT 1;
+
+  DECLARE curs CURSOR FOR SELECT passport_number FROM passengers WHERE reservation_number = NEW.reservation_number;
+  DECLARE CONTINUE HANDLER FOR NOT FOUND SET bDone = 1;
+
+  OPEN curs;
+  SET bDone = 0;
+  REPEAT
+    FETCH curs INTO p_nr;
+    SET @done = 0;
+    SET @unguessable = 0;
+    REPEAT
+      SET @unguessable = FLOOR(RAND() * 9999999);
+      IF (SELECT COUNT(*) FROM ticket WHERE id = @unguessable) = 0
+      THEN
+        SET @done = 1;
+      END IF;
+    UNTIL @done > 0
+    END REPEAT;
+
+    INSERT INTO ticket (id, passport_number, flight_number) values (@unguessable, p_nr, @f_nr);
+  UNTIL bDone END REPEAT;
+  CLOSE curs;
+END;//
+
 
 delimiter ;
