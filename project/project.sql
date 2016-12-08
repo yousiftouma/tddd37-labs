@@ -202,14 +202,13 @@ CREATE TRIGGER onBooking
 BEFORE INSERT ON booking
 FOR EACH ROW
 BEGIN
- SET @f_nr = (SELECT flight_number FROM reservation WHERE reservation_number = NEW.reservation_number);
-
-  SET @bDone = 0;
-
-  DECLARE p_nr INTEGER UNSIGNED DEFAULT 1;
-
+  DECLARE p_nr INTEGER UNSIGNED;
+  DECLARE f_nr INTEGER UNSIGNED;
+  DECLARE bDone INTEGER;
   DECLARE curs CURSOR FOR SELECT passport_number FROM passengers WHERE reservation_number = NEW.reservation_number;
   DECLARE CONTINUE HANDLER FOR NOT FOUND SET bDone = 1;
+
+  SELECT flight_number INTO f_nr FROM reservation WHERE reservation_number = NEW.reservation_number;
 
   OPEN curs;
   SET bDone = 0;
