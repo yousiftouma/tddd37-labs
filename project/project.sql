@@ -199,7 +199,7 @@ END;//
 
 
 CREATE TRIGGER onBooking
-BEFORE INSERT ON booking
+AFTER INSERT ON booking
 FOR EACH ROW
 BEGIN
   DECLARE p_nr INTEGER UNSIGNED;
@@ -225,10 +225,9 @@ BEGIN
     UNTIL @done > 0
     END REPEAT;
 
-    INSERT INTO ticket (id, passport_number, flight_number) values (@unguessable, p_nr, @f_nr);
+    INSERT INTO ticket (id, passport_number, flight_number) values (@unguessable, p_nr, f_nr);
   UNTIL bDone END REPEAT;
   CLOSE curs;
 END;//
-
 
 delimiter ;
