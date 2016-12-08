@@ -15,6 +15,9 @@ DROP TABLE IF EXISTS year;
 
 DROP PROCEDURE IF EXISTS addYear;
 DROP PROCEDURE IF EXISTS addDay;
+DROP PROCEDURE IF EXISTS addDestination;
+DROP PROCEDURE IF EXISTS addRoute;
+DROP PROCEDURE IF EXISTS addFlight;
 
 /* Create all neccessary tables */
 CREATE TABLE IF NOT EXISTS year (
@@ -41,6 +44,11 @@ CREATE TABLE IF NOT EXISTS route (
   CONSTRAINT fk_departs_to FOREIGN KEY (departs_to) REFERENCES destination(airport_code),
   CONSTRAINT fk_departs_from FOREIGN KEY (departs_from) REFERENCES destination(airport_code)
 );
+
+/*
+  Table not in BCNF, enforce candidate key uniqueness
+*/
+ALTER TABLE route ADD UNIQUE unique_route(valid, departs_to, departs_from);
 
 CREATE TABLE IF NOT EXISTS weekday (
   day VARCHAR(10) NOT NULL,
@@ -140,8 +148,34 @@ BEGIN
 	INSERT INTO weekday (year, day, weekday_factor) values (in_year, in_day, in_factor);
 END;//
 
+CREATE PROCEDURE addDestination(IN in_airport_code VARCHAR(3), IN in_name VARCHAR(30), IN in_country VARCHAR(30))
+BEGIN
+  INSERT INTO destination (airport_code, airport_name, country) values (in_airport_code, in_name, in_country);
+END;//
 
+CREATE PROCEDURE addRoute(IN in_departs_from VARCHAR(3), IN in_departs_to VARCHAR(3), IN in_valid INTEGER UNSIGNED, IN in_price DOUBLE UNSIGNED)
+BEGIN
+  INSERT INTO route (valid, departs_to, departs_from, price) values (in_valid, in_departs_to, in_departs_from, in_price);
+END;//
 
+CREATE PROCEDURE addFlight(IN in_departs_from VARCHAR(3), IN in_departs_to VARCHAR(3), IN in_year INTEGER UNSIGNED, IN in_day VARCHAR(10), IN in_departure_time TIME)
+BEGIN
+  DECLARE route_id INTEGER UNSIGNED;
+  SELECT id INTO route_id FROM route WHERE valid = in_year and departs_to = in_departs_to and departs_from = in_departs_from;
 
+  INSERT INTO weekly_departure (departure_time, day, year, route) values (in_departure_time, in_day, in_year, route_id);
+
+  /*
+    Insert a flight for every week of the year
+  */
+  SET @departure_id = -1;
+  SELECT LAST_INSERT_ID() INTO @departure_id;
+  SET @week_nr = 1;
+  REPEAT
+    INSERT INTO flight (week, departure) values (@week_nr, @departure_id);
+    SET @week_nr = @week_nr + 1;
+  UNTIL @week_nr > 52 
+  END REPEAT;
+END;//
 
 delimiter ;
