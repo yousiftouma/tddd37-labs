@@ -18,6 +18,8 @@ DROP PROCEDURE IF EXISTS addDay;
 DROP PROCEDURE IF EXISTS addDestination;
 DROP PROCEDURE IF EXISTS addRoute;
 DROP PROCEDURE IF EXISTS addFlight;
+DROP FUNCTION IF EXISTS calculateFreeSeats;
+DROP FUNCTION IF EXISTS calculatePrice;
 
 /* Create all neccessary tables */
 CREATE TABLE IF NOT EXISTS year (
@@ -176,6 +178,22 @@ BEGIN
     SET @week_nr = @week_nr + 1;
   UNTIL @week_nr > 52 
   END REPEAT;
+END;//
+
+CREATE FUNCTION calculateFreeSeats(in_flight_number INTEGER UNSIGNED) RETURNS INTEGER UNSIGNED
+BEGIN
+  RETURN (SELECT available_seats FROM flight WHERE flight_number = in_flight_number) - (SELECT COUNT(*) FROM ticket WHERE flight_number = in_flight_number);
+END;//
+
+CREATE FUNCTION calculatePrice(in_flight_number INTEGER UNSIGNED) RETURNS DOUBLE UNSIGNED
+BEGIN
+  SET @booked_seats = (SELECT COUNT(*) FROM ticket WHERE flight_number = in_flight_number);
+  SET @departure = (SELECT departure FROM flight WHERE flight_number = in_flight_number);
+  SET @route_price = (SELECT price FROM route WHERE id = (SELECT route FROM weekly_departure WHERE id = @departure));
+  SET @profit_factor = (SELECT profit_factor FROM year WHERE year = (SELECT year FROM weekly_departure WHERE id = @departure));
+  SET @weekday_factor = (SELECT weekday_factor FROM weekday WHERE (day, year) = (SELECT day, year from weekly_departure WHERE id = @departure));
+
+  RETURN @route_price*@weekday_factor*((@booked_seats+1)/40)*@profit_factor;
 END;//
 
 delimiter ;
