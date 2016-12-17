@@ -18,9 +18,15 @@ DROP PROCEDURE IF EXISTS addDay;
 DROP PROCEDURE IF EXISTS addDestination;
 DROP PROCEDURE IF EXISTS addRoute;
 DROP PROCEDURE IF EXISTS addFlight;
+DROP PROCEDURE IF EXISTS addReservation;
+DROP PROCEDURE IF EXISTS addPassenger;
+DROP PROCEDURE IF EXISTS addContact;
+DROP PROCEDURE IF EXISTS addPayment;
 DROP FUNCTION IF EXISTS calculateFreeSeats;
 DROP FUNCTION IF EXISTS calculatePrice;
 DROP TRIGGER IF EXISTS onBooking;
+
+DROP VIEW IF EXISTS allFlights;
 
 /* Create all neccessary tables */
 CREATE TABLE IF NOT EXISTS year (
@@ -108,7 +114,7 @@ CREATE TABLE IF NOT EXISTS reservation (
   reservation_number INTEGER UNSIGNED NOT NULL,
   number_of_passengers INTEGER UNSIGNED NOT NULL,
   flight_number INTEGER UNSIGNED NOT NULL,
-  contact INTEGER UNSIGNED NOT NULL,
+  contact INTEGER UNSIGNED,
   CONSTRAINT pk_reservation_number PRIMARY KEY (reservation_number),
   CONSTRAINT fk_flight_number FOREIGN KEY (flight_number) REFERENCES flight(flight_number),
   CONSTRAINT fk_contact FOREIGN KEY (contact) REFERENCES contact(passport_number)
@@ -191,18 +197,17 @@ END;//
 CREATE FUNCTION calculatePrice(in_flight_number INTEGER UNSIGNED) RETURNS DOUBLE UNSIGNED
 BEGIN
   DECLARE booked_seats INTEGER UNSIGNED;
-  DECLARE departure INTEGER UNSIGNED;
-  DECLARE route_price INTEGER UNSIGNED;
-  DECLARE profit_factor INTEGER UNSIGNED;
-  DECLARE weekday_factor INTEGER UNSIGNED;
-  
-  SET booked_seats = (SELECT COUNT(*) FROM ticket WHERE flight_number = in_flight_number);
-  SET departure = (SELECT departure FROM flight WHERE flight_number = in_flight_number);
-  SET route_price = (SELECT price FROM route WHERE id = (SELECT route FROM weekly_departure WHERE id = departure));
-  SET profit_factor = (SELECT profit_factor FROM year WHERE year = (SELECT year FROM weekly_departure WHERE id = departure));
-  SET weekday_factor = (SELECT weekday_factor FROM weekday WHERE (day, year) = (SELECT day, year from weekly_departure WHERE id = departure));
+  DECLARE departure_id INTEGER UNSIGNED;
+  DECLARE route_price DOUBLE;
+  DECLARE profit_fctr DOUBLE;
+  DECLARE weekday_fctr DOUBLE;
 
-  RETURN route_price*weekday_factor*((booked_seats+1)/40)*profit_factor;
+  SELECT COUNT(*) INTO booked_seats FROM ticket WHERE flight_number = in_flight_number;
+  SELECT departure INTO departure_id FROM flight WHERE flight_number = in_flight_number;
+  SELECT price INTO route_price FROM route WHERE id = (SELECT route FROM weekly_departure WHERE id = departure_id);
+  SELECT profit_factor INTO profit_fctr FROM year WHERE year = (SELECT year FROM weekly_departure WHERE id = departure_id);
+  SELECT weekday_factor INTO weekday_fctr FROM weekday WHERE (day, year) = (SELECT day, year from weekly_departure WHERE id = departure_id);
+  RETURN route_price*weekday_fctr*profit_fctr*((booked_seats+1)/40);
 END;//
 
 
@@ -222,7 +227,7 @@ BEGIN
   SET passenger_index = 0;
 
   REPEAT
-    IF (SELECT COUNT(*) from passengers WHERE reservation_number = NEW.reservation_number LIMIT passenger_index, 1) = 1
+    IF EXISTS (SELECT * from passengers WHERE reservation_number = NEW.reservation_number LIMIT passenger_index, 1)
       THEN
         SELECT passport_number INTO p_nr from passengers WHERE reservation_number = NEW.reservation_number LIMIT passenger_index, 1;
         SET found_unique = false;
@@ -235,10 +240,155 @@ BEGIN
           UNTIL found_unique = true
         END REPEAT; 
     	INSERT INTO ticket (id, passport_number, flight_number) VALUES (unguessable_id, p_nr, f_nr);
-        SET passenger_index = passenger_index + 1;
     END IF;
+    SET passenger_index = passenger_index + 1;
   UNTIL passenger_index >= num_passengers
   END REPEAT;
 END;//
 
+CREATE PROCEDURE addReservation(IN in_departs_from VARCHAR(3), IN in_departs_to VARCHAR(3), IN in_year INTEGER UNSIGNED, IN in_week INTEGER UNSIGNED, IN in_day VARCHAR(10), IN in_departure_time TIME, IN in_number_of_passengers INTEGER UNSIGNED, OUT output_reservation_nr INTEGER UNSIGNED)
+BEGIN
+  DECLARE flight_nr INTEGER UNSIGNED;
+  DECLARE unguessable_id INTEGER UNSIGNED;
+  DECLARE found_unique BOOLEAN;
+
+  SELECT flight_number INTO flight_nr FROM flight WHERE 
+	in_week = week AND 
+	departure = 
+		(SELECT id FROM weekly_departure WHERE 
+			departure_time = in_departure_time AND 
+			day = in_day AND 
+			year = in_year AND 
+			route = 
+				(SELECT id FROM route WHERE in_departs_from = departs_from AND in_departs_to = departs_to AND valid = in_year)
+		)
+  ;
+  IF NOT (flight_nr IS NULL)
+  THEN
+    IF (calculateFreeSeats(flight_nr)>= in_number_of_passengers)
+    THEN
+        SET found_unique = false;
+    	REPEAT
+          SET unguessable_id = FLOOR(RAND() * 9999999);
+      	    IF (SELECT COUNT(*) FROM reservation WHERE reservation_number = unguessable_id) = 0
+      	    THEN
+              SET found_unique = true;
+            END IF;
+          UNTIL found_unique = true
+        END REPEAT; 
+    	INSERT INTO reservation (reservation_number, number_of_passengers, flight_number) VALUES (unguessable_id, in_number_of_passengers, flight_nr);
+	SET output_reservation_nr = unguessable_id;
+    ELSE
+     SELECT "There are not enough seats available on the chosen flight" AS "Message";
+    END IF;
+  ELSE
+   SELECT "There exist no flight for the given route, date and time" AS "Message";
+  END IF;
+END;//
+
+/* We assume that adding more passengers than number_of_passengers is not allowed, therefor we issue a error */
+CREATE PROCEDURE addPassenger(IN in_reservation_nr INTEGER UNSIGNED, IN in_passport_nr INTEGER UNSIGNED, IN in_name VARCHAR(30))
+BEGIN
+
+  IF EXISTS (SELECT reservation_number FROM reservation WHERE reservation_number = in_reservation_nr)
+  THEN
+    IF NOT EXISTS (select * FROM booking WHERE reservation_number = in_reservation_nr)
+    THEN
+      IF ((SELECT COUNT(*) FROM passengers WHERE reservation_number = in_reservation_nr) < 
+		(SELECT number_of_passengers FROM reservation WHERE reservation_number = in_reservation_nr))
+      THEN
+        IF NOT EXISTS (SELECT * FROM passenger WHERE passport_number = in_passport_nr)
+        THEN
+      	  INSERT INTO passenger (passport_number, name) VALUES (in_passport_nr, in_name);
+        END IF;
+        INSERT INTO passengers (reservation_number, passport_number) VALUES (in_reservation_nr, in_passport_nr);
+      ELSE
+        SELECT "The given reservation cannot hold more passengers" AS "Message";
+      END IF;
+    ELSE
+      SELECT "The booking has already been payed and no futher passengers can be added" AS "Message";
+    END IF;
+  ELSE
+    SELECT "The given reservation number does not exist" AS "Message";
+  END IF;
+END;//
+
+CREATE PROCEDURE addContact(IN in_reservation_nr INTEGER UNSIGNED, IN in_passport_number INTEGER UNSIGNED, IN in_email VARCHAR(30), IN in_phone BIGINT)
+BEGIN
+
+  IF EXISTS (SELECT reservation_number FROM reservation WHERE reservation_number = in_reservation_nr)
+  THEN
+    IF EXISTS(SELECT * from passengers WHERE passport_number = in_passport_number AND reservation_number = in_reservation_nr)
+    THEN
+      IF NOT EXISTS (SELECT * FROM contact WHERE passport_number = in_passport_number)
+      THEN
+      	INSERT INTO contact (passport_number, email, phone_number) VALUES (in_passport_number, in_email, in_phone);
+      END IF;
+      UPDATE reservation SET contact = in_passport_number WHERE reservation_number = in_reservation_nr;
+    ELSE
+      SELECT "The person is not a passenger of the reservation" AS "Message";
+    END IF;
+  ELSE
+    SELECT "The given reservation number does not exist" AS "Message";
+  END IF;
+END;//
+
+CREATE PROCEDURE addPayment(IN in_reservation_nr INTEGER UNSIGNED, IN in_cardholder_name VARCHAR(30), IN in_credit_card_number BIGINT)
+BEGIN
+  DECLARE amount DOUBLE;
+  DECLARE flight_nr INTEGER UNSIGNED;
+  DECLARE number_of_passengers INTEGER UNSIGNED;
+  IF EXISTS (SELECT reservation_number FROM reservation WHERE reservation_number = in_reservation_nr)
+  THEN
+    IF NOT (SELECT contact FROM reservation WHERE reservation_number = in_reservation_nr) IS NULL
+    THEN
+      SELECT flight_number INTO flight_nr FROM reservation WHERE reservation_number = in_reservation_nr; 
+      SELECT COUNT(*) INTO number_of_passengers FROM passengers WHERE reservation_number = in_reservation_nr;
+      IF (calculateFreeSeats(flight_nr) >= number_of_passengers)
+      THEN
+      	IF NOT EXISTS (SELECT * FROM credit_card WHERE credit_card_number = in_credit_card_number)
+      	THEN
+      	  INSERT INTO credit_card (credit_card_number, holder) VALUES (in_credit_card_number, in_cardholder_name);
+      	END IF;
+      	SET amount = calculatePrice(flight_nr) * number_of_passengers;
+      	INSERT INTO booking (reservation_number, paid_amount, credit_card) VALUES (in_reservation_nr, amount, in_credit_card_number);
+      ELSE
+        SELECT "There are not enough seats available on the flight anymore, deleting reservation" AS "Message";
+        DELETE FROM passengers WHERE reservation_number = in_reservation_nr;
+        DELETE FROM reservation WHERE reservation_number = in_reservation_nr;
+      END IF;
+    ELSE
+      SELECT "The reservation has no contact yet" AS "Message";
+    END IF;
+  ELSE
+    SELECT "The given reservation number does not exist" AS "Message";
+  END IF;
+END;//
+
 delimiter ;
+
+CREATE VIEW allFlights(
+		departure_city_name,
+		destination_city_name, 
+		departure_time, 
+		departure_day, 
+		departure_week,
+ 		departure_year,
+		nr_of_free_seats,
+		current_price_per_seat
+	)
+	AS 
+	SELECT 
+		destF.airport_name, 
+		destT.airport_name, 
+		dep.departure_time, 
+		dep.day, 
+		fli.week, 
+		dep.year, 
+		calculateFreeSeats(fli.flight_number),
+		calculatePrice(fli.flight_number)
+		FROM flight AS fli
+	INNER JOIN weekly_departure AS dep ON fli.departure = dep.id
+	INNER JOIN destination AS destT ON destT.airport_code = (SELECT departs_to FROM route WHERE id = dep.route)
+	INNER JOIN destination AS destF ON destF.airport_code = (SELECT departs_from FROM route WHERE id = dep.route)
+;
