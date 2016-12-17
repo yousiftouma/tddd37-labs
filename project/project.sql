@@ -164,6 +164,9 @@ END;//
 CREATE PROCEDURE addFlight(IN in_departs_from VARCHAR(3), IN in_departs_to VARCHAR(3), IN in_year INTEGER UNSIGNED, IN in_day VARCHAR(10), IN in_departure_time TIME)
 BEGIN
   DECLARE route_id INTEGER UNSIGNED;
+  DECLARE departure_id INTEGER UNSIGNED;
+  DECLARE week_nr INTEGER UNSIGNED;
+
   SELECT id INTO route_id FROM route WHERE valid = in_year and departs_to = in_departs_to and departs_from = in_departs_from;
 
   INSERT INTO weekly_departure (departure_time, day, year, route) values (in_departure_time, in_day, in_year, route_id);
@@ -171,13 +174,12 @@ BEGIN
   /*
     Insert a flight for every week of the year
   */
-  SET @departure_id = -1;
-  SELECT LAST_INSERT_ID() INTO @departure_id;
-  SET @week_nr = 1;
+  SELECT LAST_INSERT_ID() INTO departure_id;
+  SET week_nr = 1;
   REPEAT
-    INSERT INTO flight (week, departure) values (@week_nr, @departure_id);
-    SET @week_nr = @week_nr + 1;
-  UNTIL @week_nr > 52 
+    INSERT INTO flight (week, departure) values (week_nr, departure_id);
+    SET week_nr = week_nr + 1;
+  UNTIL week_nr > 52 
   END REPEAT;
 END;//
 
@@ -188,13 +190,19 @@ END;//
 
 CREATE FUNCTION calculatePrice(in_flight_number INTEGER UNSIGNED) RETURNS DOUBLE UNSIGNED
 BEGIN
-  SET @booked_seats = (SELECT COUNT(*) FROM ticket WHERE flight_number = in_flight_number);
-  SET @departure = (SELECT departure FROM flight WHERE flight_number = in_flight_number);
-  SET @route_price = (SELECT price FROM route WHERE id = (SELECT route FROM weekly_departure WHERE id = @departure));
-  SET @profit_factor = (SELECT profit_factor FROM year WHERE year = (SELECT year FROM weekly_departure WHERE id = @departure));
-  SET @weekday_factor = (SELECT weekday_factor FROM weekday WHERE (day, year) = (SELECT day, year from weekly_departure WHERE id = @departure));
+  DECLARE booked_seats INTEGER UNSIGNED;
+  DECLARE departure INTEGER UNSIGNED;
+  DECLARE route_price INTEGER UNSIGNED;
+  DECLARE profit_factor INTEGER UNSIGNED;
+  DECLARE weekday_factor INTEGER UNSIGNED;
+  
+  SET booked_seats = (SELECT COUNT(*) FROM ticket WHERE flight_number = in_flight_number);
+  SET departure = (SELECT departure FROM flight WHERE flight_number = in_flight_number);
+  SET route_price = (SELECT price FROM route WHERE id = (SELECT route FROM weekly_departure WHERE id = departure));
+  SET profit_factor = (SELECT profit_factor FROM year WHERE year = (SELECT year FROM weekly_departure WHERE id = departure));
+  SET weekday_factor = (SELECT weekday_factor FROM weekday WHERE (day, year) = (SELECT day, year from weekly_departure WHERE id = departure));
 
-  RETURN @route_price*@weekday_factor*((@booked_seats+1)/40)*@profit_factor;
+  RETURN route_price*weekday_factor*((booked_seats+1)/40)*profit_factor;
 END;//
 
 
@@ -204,30 +212,33 @@ FOR EACH ROW
 BEGIN
   DECLARE p_nr INTEGER UNSIGNED;
   DECLARE f_nr INTEGER UNSIGNED;
-  DECLARE bDone INTEGER;
-  DECLARE curs CURSOR FOR SELECT passport_number FROM passengers WHERE reservation_number = NEW.reservation_number;
-  DECLARE CONTINUE HANDLER FOR NOT FOUND SET bDone = 1;
+  DECLARE passenger_index INTEGER UNSIGNED;
+  DECLARE num_passengers INTEGER UNSIGNED;
+  DECLARE unguessable_id INTEGER UNSIGNED;
+  DECLARE found_unique BOOLEAN;
 
   SELECT flight_number INTO f_nr FROM reservation WHERE reservation_number = NEW.reservation_number;
+  SELECT COUNT(*) INTO num_passengers from passengers;
+  SET passenger_index = 0;
 
-  OPEN curs;
-  SET bDone = 0;
   REPEAT
-    FETCH curs INTO p_nr;
-    SET @done = 0;
-    SET @unguessable = 0;
-    REPEAT
-      SET @unguessable = FLOOR(RAND() * 9999999);
-      IF (SELECT COUNT(*) FROM ticket WHERE id = @unguessable) = 0
+    IF (SELECT COUNT(*) from passengers WHERE reservation_number = NEW.reservation_number LIMIT passenger_index, 1) = 1
       THEN
-        SET @done = 1;
-      END IF;
-    UNTIL @done > 0
-    END REPEAT;
-
-    INSERT INTO ticket (id, passport_number, flight_number) values (@unguessable, p_nr, f_nr);
-  UNTIL bDone END REPEAT;
-  CLOSE curs;
+        SELECT passport_number INTO p_nr from passengers WHERE reservation_number = NEW.reservation_number LIMIT passenger_index, 1;
+        SET found_unique = false;
+    	REPEAT
+          SET unguessable_id = FLOOR(RAND() * 9999999);
+      	    IF (SELECT COUNT(*) FROM ticket WHERE id = unguessable_id) = 0
+      	    THEN
+              SET found_unique = true;
+            END IF;
+          UNTIL found_unique = true
+        END REPEAT; 
+    	INSERT INTO ticket (id, passport_number, flight_number) VALUES (unguessable_id, p_nr, f_nr);
+        SET passenger_index = passenger_index + 1;
+    END IF;
+  UNTIL passenger_index >= num_passengers
+  END REPEAT;
 END;//
 
 delimiter ;
